@@ -2461,6 +2461,194 @@
       this.shake = Math.min(10, this.shake + 3);
     }
 
+    spawnParticles(x, y, count, color, spd, type='default') {
+      const amt = Math.max(0, Math.floor(count || 0));
+      for (let i = 0; i < amt; i++) {
+        this.particles.push(new Particle(x, y, color, spd, type));
+      }
+    }
+
+    spawnExplosion(x, y, scale=1.0) {
+      const size = Math.max(0.4, scale || 1.0);
+      this.spawnParticles(x, y, Math.floor(18 * size), STYLE.gold, 6 * size, 'spark');
+      this.spawnParticles(x, y, Math.floor(10 * size), 'rgba(255,120,80,0.9)', 4 * size, 'smoke');
+      this.spawnParticles(x, y, Math.floor(8 * size), STYLE.cyan, 3 * size, 'glow');
+      this.shake = Math.min(18, this.shake + 4 * size);
+    }
+
+    spawnImpactSparks(x, y) {
+      this.spawnParticles(x, y, 6, STYLE.cyan, 4.0, 'spark');
+      this.spawnParticles(x, y, 3, STYLE.white, 2.5, 'glow');
+    }
+
+    spawnMuzzleFlash(x, y, dx=0, dy=0) {
+      this.spawnParticles(x + dx * 6, y + dy * 6, 4, STYLE.gold, 3.5, 'spark');
+      this.spawnParticles(x + dx * 4, y + dy * 4, 2, STYLE.cyan, 2.0, 'glow');
+    }
+
+    spawnFloater(x, y, text, color) {
+      this.floaters.push(new Floater(x, y, text, color || STYLE.text));
+    }
+
+    handleCollisions() {
+      const player = this.player;
+      const partner = this.partner;
+
+      const hitCheck = (a, b) => dist2(a.x, a.y, b.x, b.y) < (a.r + b.r) * (a.r + b.r);
+
+      const applyHitKnockback = (target, source, strength=4) => {
+        const dx = target.x - source.x;
+        const dy = target.y - source.y;
+        const len = Math.hypot(dx, dy) || 1;
+        target.pushX += (dx / len) * strength;
+        target.pushY += (dy / len) * strength;
+      };
+
+      for (const b of this.bullets) {
+        if (b.dead) continue;
+
+        for (const e of this.enemies) {
+          if (e.dead || b.dead) continue;
+          if (b._hitSet.has(e)) continue;
+          if (dist2(b.x, b.y, e.x, e.y) < (b.r + e.r) * (b.r + e.r)) {
+            b._hitSet.add(e);
+            e.hurt(this, b.damage);
+            this.spawnImpactSparks(e.x, e.y);
+            if (b.pierce > 0) b.pierce--;
+
+            if (b.chain > 0) {
+              const candidates = this.enemies.filter(en => !en.dead && !b._hitSet.has(en));
+              let next = null;
+              let best = Infinity;
+              for (const en of candidates) {
+                const d2 = dist2(e.x, e.y, en.x, en.y);
+                if (d2 < best) {
+                  best = d2;
+                  next = en;
+                }
+              }
+              if (next) {
+                const dx = next.x - b.x;
+                const dy = next.y - b.y;
+                const len = Math.hypot(dx, dy) || 1;
+                const spd = Math.hypot(b.vx, b.vy) || this.wpn.bulletSpeed;
+                b.vx = (dx / len) * spd;
+                b.vy = (dy / len) * spd;
+                b.chain--;
+              }
+            }
+
+            if (b.pierce <= 0 && b.chain <= 0) b.dead = true;
+          }
+        }
+
+        if (this.boss && !this.boss.dead && !b.dead && !b._hitSet.has(this.boss)) {
+          if (dist2(b.x, b.y, this.boss.x, this.boss.y) < (b.r + this.boss.r) * (b.r + this.boss.r)) {
+            b._hitSet.add(this.boss);
+            this.boss.hurt(this, b.damage);
+            this.spawnImpactSparks(this.boss.x, this.boss.y);
+            if (b.pierce > 0) b.pierce--;
+            if (b.pierce <= 0 && b.chain <= 0) b.dead = true;
+          }
+        }
+      }
+
+      for (const b of this.enemyBullets) {
+        if (b.dead) continue;
+        if (!player.dead && hitCheck(b, player)) {
+          player.hurt(b.damage);
+          this.spawnParticles(player.x, player.y, 6, STYLE.danger, 4.0, 'spark');
+          b.dead = true;
+          continue;
+        }
+        if (partner.enabled && !partner.dead && hitCheck(b, partner)) {
+          partner.hurt(b.damage);
+          this.spawnParticles(partner.x, partner.y, 5, STYLE.gold, 3.5, 'spark');
+          b.dead = true;
+        }
+      }
+
+      for (const e of this.enemies) {
+        if (e.dead) continue;
+        if (!player.dead && hitCheck(e, player)) {
+          player.hurt(e.touchDmg);
+          applyHitKnockback(e, player, 6);
+        }
+        if (partner.enabled && !partner.dead && hitCheck(e, partner)) {
+          partner.hurt(Math.max(1, Math.floor(e.touchDmg * 0.75)));
+          applyHitKnockback(e, partner, 4);
+        }
+      }
+
+      if (this.boss && !this.boss.dead) {
+        if (!player.dead && hitCheck(this.boss, player)) {
+          player.hurt(this.boss.touchDmg);
+        }
+        if (partner.enabled && !partner.dead && hitCheck(this.boss, partner)) {
+          partner.hurt(this.boss.touchDmg);
+        }
+      }
+
+      for (const p of this.pickups) {
+        if (p.dead) continue;
+        if (dist2(p.x, p.y, player.x, player.y) < (p.r + player.r) * (p.r + player.r)) {
+          if (p.kind === 'upgrade' && p.data) {
+            this.applyUpgrade(p.data);
+            this.spawnParticles(player.x, player.y, 12, STYLE.neon, 4.0, 'glow');
+            for (const other of this.pickups) {
+              if (other.kind === 'upgrade') other.dead = true;
+            }
+            p.dead = true;
+          } else if (p.kind === 'xp') {
+            this.xp += 2;
+            p.dead = true;
+          } else if (p.kind === 'hp') {
+            this.player.hp = Math.min(this.player.maxHp, this.player.hp + 1);
+            this.spawnFloater(player.x, player.y - 12, '+1 HP', STYLE.gold);
+            p.dead = true;
+          }
+        }
+      }
+
+      for (const hz of this.hazards) {
+        if (hz.t < hz.tele) continue;
+        if (hz.kind === 'exploder') {
+          if (!player.dead && dist2(player.x, player.y, hz.x, hz.y) < 24 * 24) player.hurt(1);
+          if (partner.enabled && !partner.dead && dist2(partner.x, partner.y, hz.x, hz.y) < 24 * 24) partner.hurt(1);
+        } else if (hz.kind === 'barrierV') {
+          if (!player.dead && Math.abs(player.x - hz.x) < player.r + 4) player.hurt(1);
+          if (partner.enabled && !partner.dead && Math.abs(partner.x - hz.x) < partner.r + 4) partner.hurt(1);
+        } else if (hz.kind === 'barrierH') {
+          if (!player.dead && Math.abs(player.y - hz.y) < player.r + 4) player.hurt(1);
+          if (partner.enabled && !partner.dead && Math.abs(partner.y - hz.y) < partner.r + 4) partner.hurt(1);
+        } else if (hz.kind === 'laser') {
+          const b = this.bounds;
+          const t = clamp((hz.t - hz.tele) / hz.live, 0, 1);
+          const a = hz.a0 + (hz.a1 - hz.a0) * t;
+          const cx = (b.l + b.r) / 2;
+          const cy = (b.t + b.b) / 2;
+          const gapC = a + Math.PI / 2;
+          const checkTarget = (ent) => {
+            const dx = ent.x - cx;
+            const dy = ent.y - cy;
+            const ang = Math.atan2(dy, dx);
+            const angDiff = Math.atan2(Math.sin(ang - gapC), Math.cos(ang - gapC));
+            if (Math.abs(angDiff) <= hz.gap) return;
+            const distLine = Math.abs(Math.sin(a) * (ent.x - cx) - Math.cos(a) * (ent.y - cy));
+            if (distLine < ent.r + 6) ent.hurt(1);
+          };
+          if (!player.dead) checkTarget(player);
+          if (partner.enabled && !partner.dead) checkTarget(partner);
+        }
+      }
+
+      if (player.dead && this.state === 'play') {
+        this.state = 'lose';
+        this.stateTimer = 90;
+        this.stats.deathInfo = { wave: this.wave, time: Date.now() - this.stats.startTime };
+      }
+    }
+
     update() {
       if (this.paused) return; // Paused logic handled in Scene
 
