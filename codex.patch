@@ -1,0 +1,875 @@
+diff --git a/PK_MinigameShooter2.js b/PK_MinigameShooter2.js
+index 99e22afce0732fe3c245bf837a9c1ef7c1d7dd7a..e34c2bdfdd69641e05a598eba5754ac1ad316390 100644
+--- a/PK_MinigameShooter2.js
++++ b/PK_MinigameShooter2.js
+@@ -342,57 +342,67 @@
+   const PlayerMaxHP = Math.max(1, Number(P.PlayerMaxHP || 6));
+   const PartnerEnabledByDefault = String(P.PartnerEnabledByDefault || 'true') === 'true';
+   const PartnerMaxHP = Math.max(1, Number(P.PartnerMaxHP || 4));
+   const AutoShootByDefault = String(P.AutoShootByDefault || 'true') === 'true';
+ 
+   const UsePictureSpritesDefault = String(P.UsePictureSprites || 'false') === 'true';
+   const SpriteScaleDefault = Number(P.SpriteScale || 1.0);
+ 
+   const DefaultPics = {
+     player: String(P.PlayerPic || ''),
+     partner: String(P.PartnerPic || ''),
+     enemy: String(P.EnemyPic || ''),
+     bullet: String(P.BulletPic || ''),
+     xp: String(P.XpPic || ''),
+     hp: String(P.HpPic || ''),
+     upgrade: String(P.UpgradePic || ''),
+   };
+ 
+   const ScoreVariableId = Number(P.ScoreVariableId || 1);
+   const WinSwitchId = Number(P.WinSwitchId || 1);
+   const LoseSwitchId = Number(P.LoseSwitchId || 2);
+ 
+   // ---------------------------------------------------------------------------
+   // Utils
+   // ---------------------------------------------------------------------------
+-  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+-  const rand01 = () => Math.random();
+-  const randInt = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+-  const dist2 = (x1, y1, x2, y2) => {
+-    const dx = x2 - x1, dy = y2 - y1;
+-    return dx*dx + dy*dy;
+-  };
++  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
++  const rand01 = () => Math.random();
++  const randInt = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
++  const dist2 = (x1, y1, x2, y2) => {
++    const dx = x2 - x1, dy = y2 - y1;
++    return dx*dx + dy*dy;
++  };
++  const weightedPick = (items, weightFn) => {
++    const total = items.reduce((sum, item) => sum + Math.max(0, weightFn(item)), 0);
++    if (total <= 0) return null;
++    let roll = Math.random() * total;
++    for (const item of items) {
++      roll -= Math.max(0, weightFn(item));
++      if (roll <= 0) return item;
++    }
++    return items[items.length - 1] || null;
++  };
+ 
+   function dt() {
+     const d = Number(Graphics.deltaTime);
+     return Number.isFinite(d) && d > 0 ? d : (1/60);
+   }
+ 
+   function bitmapUpdate(bmp) {
+     if (bmp && bmp._baseTexture) bmp._baseTexture.update();
+   }
+ 
+   function drawEnemyShape(ctx, x, y, r, shape, color, pulse) {
+     ctx.save();
+     
+     // Extract RGB from color string for gradients
+     const colorMatch = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+     const baseR = colorMatch ? parseInt(colorMatch[1]) : 255;
+     const baseG = colorMatch ? parseInt(colorMatch[2]) : 90;
+     const baseB = colorMatch ? parseInt(colorMatch[3]) : 90;
+     
+     // Create radial gradient for depth
+     const grad = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, 0, x, y, r * pulse);
+     grad.addColorStop(0, `rgba(${Math.min(255, baseR + 60)},${Math.min(255, baseG + 60)},${Math.min(255, baseB + 60)},0.95)`);
+     grad.addColorStop(0.6, color);
+     grad.addColorStop(1, `rgba(${Math.max(0, baseR - 40)},${Math.max(0, baseG - 40)},${Math.max(0, baseB - 40)},0.9)`);
+     
+@@ -742,57 +752,158 @@
+         }
+         break;
+         
+       default: // circle - Chaser - basic, aggressive
+         ctx.fillStyle = grad;
+         ctx.strokeStyle = `rgba(${Math.min(255, baseR + 80)},${Math.min(255, baseG + 80)},${Math.min(255, baseB + 80)},1)`;
+         ctx.lineWidth = 2.5;
+         ctx.beginPath();
+         ctx.arc(x, y, r * pulse, 0, Math.PI * 2);
+         ctx.fill();
+         ctx.stroke();
+         
+         // Inner ring
+         ctx.shadowBlur = 0;
+         ctx.strokeStyle = `rgba(${Math.min(255, baseR + 100)},${Math.min(255, baseG + 100)},${Math.min(255, baseB + 100)},0.6)`;
+         ctx.lineWidth = 2;
+         ctx.beginPath();
+         ctx.arc(x, y, r * pulse * 0.6, 0, Math.PI * 2);
+         ctx.stroke();
+         break;
+     }
+     
+     ctx.restore();
+   }
+ 
+-  function difficultyMult(diff) {
+-    switch (diff) {
+-      case 'easy':  return { enemyHp: 0.85, enemySpd: 0.85, enemyCount: 0.85, bulletSpeed: 0.95, xpNeed: 0.92, boss: 0.90 };
+-      case 'hard':  return { enemyHp: 1.20, enemySpd: 1.15, enemyCount: 1.25, bulletSpeed: 1.05, xpNeed: 1.08, boss: 1.08 };
+-      default:      return { enemyHp: 1.00, enemySpd: 1.00, enemyCount: 1.00, bulletSpeed: 1.00, xpNeed: 1.00, boss: 1.00 };
+-    }
+-  }
++  function difficultyMult(diff) {
++    switch (diff) {
++      case 'easy':  return { enemyHp: 0.85, enemySpd: 0.85, enemyCount: 0.85, bulletSpeed: 0.95, xpNeed: 0.92, boss: 0.90 };
++      case 'hard':  return { enemyHp: 1.20, enemySpd: 1.15, enemyCount: 1.25, bulletSpeed: 1.05, xpNeed: 1.08, boss: 1.08 };
++      default:      return { enemyHp: 1.00, enemySpd: 1.00, enemyCount: 1.00, bulletSpeed: 1.00, xpNeed: 1.00, boss: 1.00 };
++    }
++  }
++
++  const RARITY_WEIGHTS = {
++    common: 6,
++    rare: 3.2,
++    epic: 1.6,
++    legendary: 0.7,
++  };
++
++  const ENEMY_SCORE = {
++    chaser: 1,
++    runner: 1,
++    tank: 2,
++    shooter: 2,
++    splitter: 2,
++    teleporter: 2,
++    anchor: 2,
++    sniper: 3,
++    droneSpawner: 3,
++    healer: 3,
++    mimic: 2,
++    shieldProjector: 3,
++    shieldWall: 4,
++    railCharger: 3,
++    splitterPlus: 4,
++  };
++
++  const ENEMY_COSTS = {
++    chaser: 1,
++    runner: 1,
++    tank: 2,
++    shooter: 2,
++    splitter: 2,
++    teleporter: 2,
++    anchor: 2,
++    sniper: 3,
++    droneSpawner: 3,
++    healer: 3,
++    mimic: 2,
++    shieldProjector: 3,
++    shieldWall: 4,
++    railCharger: 3,
++    splitterPlus: 4,
++  };
++
++  const ENEMY_TIER_TABLE = [
++    { minWave: 1, weights: { chaser: 8, runner: 1 } },
++    { minWave: 2, weights: { chaser: 6, runner: 2, shooter: 1 } },
++    { minWave: 3, weights: { chaser: 5, runner: 2, shooter: 2, tank: 1 } },
++    { minWave: 4, weights: { chaser: 4, runner: 2, shooter: 2, tank: 1, splitter: 1 } },
++    { minWave: 5, weights: { chaser: 3, runner: 2, shooter: 2, tank: 1, splitter: 1, teleporter: 1 } },
++    { minWave: 6, weights: { chaser: 3, runner: 2, shooter: 2, tank: 1, splitter: 1, teleporter: 1, sniper: 1 } },
++    { minWave: 7, weights: { chaser: 3, runner: 2, shooter: 2, tank: 1, splitter: 1, teleporter: 1, sniper: 1, droneSpawner: 1 } },
++    { minWave: 8, weights: { chaser: 2, runner: 2, shooter: 2, tank: 1, splitter: 1, teleporter: 1, sniper: 1, droneSpawner: 1, healer: 1 } },
++    { minWave: 11, weights: { chaser: 2, runner: 2, shooter: 2, tank: 1, splitter: 1, teleporter: 1, sniper: 1, droneSpawner: 1, healer: 1, shieldProjector: 1 } },
++    { minWave: 13, weights: { chaser: 2, runner: 2, shooter: 2, tank: 1, splitter: 1, teleporter: 1, sniper: 1, droneSpawner: 1, healer: 1, shieldProjector: 1, railCharger: 1 } },
++    { minWave: 15, weights: { chaser: 2, runner: 2, shooter: 2, tank: 1, splitter: 1, teleporter: 1, sniper: 1, droneSpawner: 1, healer: 1, shieldProjector: 1, railCharger: 1, shieldWall: 1 } },
++    { minWave: 17, weights: { chaser: 2, runner: 2, shooter: 2, tank: 1, splitter: 1, teleporter: 1, sniper: 1, droneSpawner: 1, healer: 1, shieldProjector: 1, railCharger: 1, shieldWall: 1, splitterPlus: 1 } },
++    { minWave: 20, weights: { chaser: 2, runner: 2, shooter: 2, tank: 1, splitter: 1, teleporter: 1, sniper: 1, droneSpawner: 1, healer: 1, shieldProjector: 1, railCharger: 1, shieldWall: 1, splitterPlus: 1, anchor: 1 } },
++  ];
++
++  const WAVE_SQUADS = [
++    { minWave: 1, weight: 4, cost: 3, types: ['chaser', 'chaser', 'runner'] },
++    { minWave: 2, weight: 3, cost: 4, types: ['runner', 'runner', 'chaser', 'shooter'] },
++    { minWave: 3, weight: 3, cost: 5, types: ['chaser', 'shooter', 'tank'] },
++    { minWave: 4, weight: 3, cost: 5, types: ['runner', 'splitter', 'chaser', 'chaser'] },
++    { minWave: 5, weight: 2, cost: 6, types: ['teleporter', 'runner', 'chaser', 'shooter'] },
++    { minWave: 6, weight: 2, cost: 6, types: ['sniper', 'runner', 'chaser', 'chaser'] },
++    { minWave: 7, weight: 2, cost: 7, types: ['droneSpawner', 'runner', 'chaser'] },
++    { minWave: 8, weight: 2, cost: 7, types: ['healer', 'tank', 'chaser', 'runner'] },
++    { minWave: 11, weight: 2, cost: 8, types: ['shieldProjector', 'shooter', 'chaser', 'runner'] },
++    { minWave: 13, weight: 2, cost: 8, types: ['railCharger', 'runner', 'shooter', 'chaser'] },
++    { minWave: 15, weight: 1, cost: 9, types: ['shieldWall', 'tank', 'runner'] },
++    { minWave: 17, weight: 1, cost: 9, types: ['splitterPlus', 'shooter', 'chaser'] },
++    { minWave: 20, weight: 1, cost: 9, types: ['anchor', 'shooter', 'runner', 'chaser'] },
++  ];
++
++  function getEnemyWeights(wave) {
++    let active = ENEMY_TIER_TABLE[0].weights;
++    for (const tier of ENEMY_TIER_TABLE) {
++      if (wave >= tier.minWave) active = tier.weights;
++    }
++    return active;
++  }
++
++  function pickEnemyType(wave, remainingBudget) {
++    const weights = getEnemyWeights(wave);
++    const entries = Object.keys(weights)
++      .filter(type => (ENEMY_COSTS[type] || 1) <= remainingBudget)
++      .map(type => ({ type, weight: weights[type] }));
++    if (wave >= 12 && remainingBudget >= ENEMY_COSTS.mimic && rand01() < 0.06) {
++      return 'mimic';
++    }
++    const picked = weightedPick(entries, item => item.weight);
++    return picked ? picked.type : 'chaser';
++  }
++
++  function pickSquad(wave, remainingBudget) {
++    const options = WAVE_SQUADS.filter(squad => squad.minWave <= wave && squad.cost <= remainingBudget);
++    if (options.length === 0) return null;
++    return weightedPick(options, squad => squad.weight);
++  }
+ 
+   // ---------------------------------------------------------------------------
+   // Style
+   // ---------------------------------------------------------------------------
+   const STYLE = {
+     bgA: 'rgba(0,0,0,0.88)',
+     bgB: 'rgba(12,16,24,0.74)',
+     panel: 'rgba(255,255,255,0.06)',
+     text: 'rgba(255,255,255,0.92)',
+     textDim: 'rgba(255,255,255,0.70)',
+     neon: 'rgba(140,255,190,0.95)',
+     neonSoft: 'rgba(140,255,190,0.25)',
+     cyan: 'rgba(140,220,255,0.92)',
+     cyanSoft: 'rgba(140,220,255,0.22)',
+     danger: 'rgba(255,90,90,0.92)',
+     dangerSoft: 'rgba(255,90,90,0.25)',
+     gold: 'rgba(255,215,120,0.92)',
+     goldSoft: 'rgba(255,215,120,0.22)',
+     pink: 'rgba(255,120,200,0.92)',
+     pinkSoft: 'rgba(255,120,200,0.22)',
+     white: '#ffffff',
+   };
+ 
+   function drawVignette(bmp) {
+     const ctx = bmp.context;
+@@ -1143,53 +1254,55 @@
+       this.hp = this.maxHp;
+       this.speed = (1.15 + wave*0.07) * mult.enemySpd * stats.speedMul;
+       this.touchDmg = stats.touchDmg;
+       this.shootCd = randInt(20, 70);
+       this.pulseT = rand01() * Math.PI*2;
+       this.pushX = 0;
+       this.pushY = 0;
+       
+       // Visual properties for uniqueness
+       this.color = stats.color;
+       this.shape = stats.shape;
+       this.hasTrail = stats.trail;
+       this.trailParticles = [];
+       
+       if (type === 'teleporter') this.teleportCd = randInt(120, 180);
+       else if (type === 'anchor') { this.anchorCd = randInt(180, 240); this.anchorActive = false; }
+       else if (type === 'sniper') { this.chargeCd = randInt(150, 200); this.charging = false; this.chargeT = 0; }
+       else if (type === 'droneSpawner') { this.spawnCd = randInt(120, 180); this.dronesSpawned = 0; }
+       else if (type === 'healer') { this.healCd = 30; this.healTarget = null; }
+       else if (type === 'mimic') { this.mimicType = rand01() < 0.5 ? 'hp' : 'upgrade'; this.revealed = false; }
+       else if (type === 'shieldProjector') { this.shieldCd = 60; }
+       else if (type === 'shieldWall') { this.formation = 'wedge'; this.angle = rand01() * Math.PI * 2; }
+       else if (type === 'railCharger') { this.chargeCd = randInt(100, 150); this.charging = false; this.chargeT = 0; this.chargeDir = { x: 0, y: 0 }; }
+     }
+ 
+-    hurt(g, dmg) {
+-      this.hp -= dmg;
+-      this.hitFlash = 0.22;
++    hurt(g, dmg) {
++      const dealt = Math.min(dmg, this.hp);
++      this.hp -= dmg;
++      g.stats.damageDealt += dealt;
++      this.hitFlash = 0.22;
+       g.spawnImpactSparks(this.x, this.y, this.vx, this.vy);
+       g.spawnFloater(this.x, this.y - 12, String(dmg), (dmg > 2 ? STYLE.gold : STYLE.white));
+       if (this.hp <= 0) {
+         this.dead = true;
+         g.onEnemyKilled(this);
+       }
+     }
+ 
+     update(g) {
+       this.pulseT += dt() * 2.2;
+       this.pushX *= 0.85;
+       this.pushY *= 0.85;
+ 
+       const p = g.player;
+       let dx = p.x - this.x;
+       let dy = p.y - this.y;
+       let d = Math.hypot(dx, dy) || 1;
+       dx /= d; dy /= d;
+ 
+       if (this.type === 'shooter') {
+         const desired = 160;
+         if (d < desired) { dx *= -1; dy *= -1; }
+         this.vx = dx * this.speed + this.pushX;
+         this.vy = dy * this.speed + this.pushY;
+         this.shootCd--;
+@@ -1687,63 +1800,65 @@
+     
+     spawnHeatZones(g) {
+       const b = g.bounds;
+       for (let i = 0; i < 4; i++) {
+         const x = randInt(b.l + 50, b.r - 50);
+         const y = randInt(b.t + 50, b.b - 50);
+         this.heatZones.push({ x, y, radius: 40, heat: 0 });
+       }
+     }
+     
+     spawnCrystals(g) {
+       const b = g.bounds;
+       for (let i = 0; i < 5; i++) {
+         const x = randInt(b.l + 40, b.r - 40);
+         const y = randInt(b.t + 40, b.b - 40);
+         this.crystals.push({ x, y, hp: 10, dead: false });
+       }
+     }
+     
+     initializeGrid(g) {
+       for (let i = 0; i < 8; i++) {
+         this.gridLasers.push({ angle: i * (Math.PI / 4), active: true });
+       }
+     }
+     
+-    hurt(g, dmg) {
+-      if (this.invuln > 0) return;
++    hurt(g, dmg) {
++      if (this.invuln > 0) return;
+       
+       // Glass Saint reflects damage if crystals alive
+       if (this.bossType === 'glassSaint' && this.reflectActive) {
+         const aliveCrystals = this.crystals.filter(c => !c.dead).length;
+         if (aliveCrystals > 0) {
+           g.spawnFloater(this.x, this.y - 30, 'REFLECTED!', STYLE.cyan);
+           return;
+         }
+       }
+       
+-      this.hp -= dmg;
++      const dealt = Math.min(dmg, this.hp);
++      this.hp -= dmg;
++      g.stats.damageDealt += dealt;
+       this.hitFlash = 0.25;
+       this.invuln = 0.05;
+       g.spawnFloater(this.x, this.y - 30, String(dmg), STYLE.pink);
+       
+       if (this.hp <= 0) {
+         this.dead = true;
+         g.bossDefeated = true;
+         g.spawnExplosion(this.x, this.y, 2.5);
+         g.systemMessages.push({ text: `${this.bossName} DEFEATED!`, life: 3.0, y: 0, color: STYLE.gold });
+         g.stats.bossesDefeated++;
+       }
+     }
+   }
+ 
+   class Bullet {
+     constructor(x, y, vx, vy, owner, stats) {
+       this.x=x; this.y=y; this.vx=vx; this.vy=vy;
+       this.owner=owner;
+       this.r = stats.r;
+       this.damage = stats.damage;
+       this.pierce = stats.pierce;
+       this.bounce = stats.bounce;
+       this.boomerang = stats.boomerang;
+       this.chain = stats.chain;
+       this.rainbow = stats.rainbow;
+@@ -1982,87 +2097,90 @@
+       
+       const modifiers = ['none', 'lowGravity', 'overheated', 'empStorms', 'fog'];
+       const modRoll = rand01();
+       this.arenaModifier = opts.arenaModifier || (modRoll < 0.4 ? 'none' : modifiers[randInt(1, modifiers.length - 1)]);
+       
+       this.arenaHazards = [];
+       this.arenaGlitchLevel = 0;
+       this.systemMessages = [];
+       this.parallaxOffset = 0;
+       this.windForce = { x: 0, y: 0 };
+       this.fogAlpha = 0;
+       this.empTimer = 0;
+       
+       // Arena hazards disabled for cleaner visuals
+       
+       this.systemMessages.push({ text: `ARENA: ${this.arenaType.toUpperCase()}`, life: 3.0, y: 0 });
+       if (this.arenaModifier !== 'none') {
+         this.systemMessages.push({ text: `MODIFIER: ${this.arenaModifier.toUpperCase()}`, life: 3.0, y: 0 });
+       }
+ 
+       this.score = 0;
+       this.level = 1;
+       this.xp = 0;
+       this.xpNeed = Math.floor(8 * this.mult.xpNeed);
+ 
+-      this.build = {
+-        moveMul: 1.0,
+-        magnet: 0,
+-        partnerMoveMul: 1.0,
+-        partnerCooldown: 22,
+-        partnerDamageMul: 1.0,
+-        critChance: 0,
+-        lifesteal: false,
+-        dashMul: 1.0,
+-        xpMul: 1.0,
+-        explosive: false,
+-        homing: false,
+-        player: this.player,
+-      };
++      this.build = {
++        moveMul: 1.0,
++        magnet: 0,
++        partnerMoveMul: 1.0,
++        partnerCooldown: 22,
++        partnerDamageMul: 1.0,
++        critChance: 0,
++        lifesteal: false,
++        dashMul: 1.0,
++        xpMul: 1.0,
++        explosive: false,
++        homing: false,
++        hasWeaponUpgrade: false,
++        player: this.player,
++      };
+ 
+       this.wpn = {
+         damage: 3,
+         pellets: 1,
+         spread: 0.18,
+         cooldown: 12,
+         bulletSpeed: 8.2 * this.mult.bulletSpeed,
+         pierce: 0,
+         bounce: 0,
+         boomerang: false,
+         chain: 0,
+         rainbow: false,
+         r: 4,
+         life: 52,
+         pattern: 'default',
+       };
+ 
+-      // AAA UI/HUD TRACKING
+-      this.currentTarget = null;
+-      this.offscreenThreats = [];
+-      this.upgradeHoverIndex = -1;
+-      this.upgradeKeyboardIndex = 0;
+-      this.pauseOnUpgrade = true;
++      // AAA UI/HUD TRACKING
++      this.currentTarget = null;
++      this.offscreenThreats = [];
++      this.upgradeHoverIndex = -1;
++      this.upgradeKeyboardIndex = 0;
++      this.pauseOnUpgrade = true;
++      this.upgradeHistory = [];
++      this.upgradePity = 0;
+       
+       // Run statistics for summary
+       this.stats = {
+         damageDealt: 0,
+         bossesDefeated: 0,
+         upgradesCollected: {},
+         killsByType: {},
+         deathInfo: null,
+         startTime: Date.now(),
+         maxWaveReached: 1,
+       };
+       
+       // Accessibility options
+       this.accessibility = {
+         colorblindMode: 'none',
+         reduceFlashes: false,
+         reduceShake: false,
+         largeUI: false,
+       };
+       
+       // HP regeneration when partner is alive
+       this.hpRegenTimer = 0;
+       this.hpRegenInterval = 180; // Regen 1 HP every 3 seconds (180 frames at 60fps)
+     }
+ 
+@@ -2148,190 +2266,222 @@
+           const px = x + Math.cos(a + Math.PI/2) * off;
+           const py = y + Math.sin(a + Math.PI/2) * off;
+           this.enemyBullets.push(new Bullet(px, py, Math.cos(a)*spd, Math.sin(a)*spd, 'boss', stats));
+         }
+       }
+     }
+ 
+     spawnBossExploder(x, y) {
+       this.hazards.push({ kind:'exploder', x, y, t:0, tele:0.95 });
+     }
+     spawnBossBarrier(seedAng) {
+       const vertical = rand01() < 0.5;
+       const b = this.bounds;
+       if (vertical) {
+         const x = clamp((b.l+b.r)/2 + Math.cos(seedAng)*150, b.l+70, b.r-70);
+         this.hazards.push({ kind:'barrierV', x, t:0, tele:0.90, live:0.75 });
+       } else {
+         const y = clamp((b.t+b.b)/2 + Math.sin(seedAng)*110, b.t+70, b.b-70);
+         this.hazards.push({ kind:'barrierH', y, t:0, tele:0.90, live:0.75 });
+       }
+     }
+     spawnBossLaserSweep(seedAng) {
+       this.hazards.push({ kind:'laser', t:0, tele:0.95, live:1.15, a0: seedAng, a1: seedAng + Math.PI*0.65, gap: 0.33 });
+     }
+ 
+-    onEnemyKilled(e) {
+-      this.score += 1;
+-      const xpGain = Math.floor((1 + (this.wave * 0.05)) * (this.build.xpMul || 1.0));
+-      this.xp += xpGain;
+-      this.spawnFloater(e.x, e.y, `+${xpGain} XP`, STYLE.cyan);
++    onEnemyKilled(e) {
++      const scoreGain = ENEMY_SCORE[e.type] || 1;
++      this.score += scoreGain;
++      this.stats.killsByType[e.type] = (this.stats.killsByType[e.type] || 0) + 1;
++      const xpGain = Math.floor((1 + (this.wave * 0.05)) * (this.build.xpMul || 1.0));
++      this.xp += xpGain;
++      this.spawnFloater(e.x, e.y, `+${xpGain} XP`, STYLE.cyan);
+       this.spawnParticles(e.x, e.y, 14, STYLE.danger, 4.0);
+       
+       // Lifesteal mechanic
+       if (this.build.lifesteal && rand01() < 0.25) {
+         this.player.hp = Math.min(this.player.maxHp, this.player.hp + 1);
+         this.spawnFloater(this.player.x, this.player.y - 15, '+1 HP', STYLE.gold);
+       }
+       
+       // Explosive mechanic
+       if (this.build.explosive) {
+         const nearEnemies = this.enemies.filter(en => !en.dead && dist2(en.x, en.y, e.x, e.y) < 80*80);
+         nearEnemies.forEach(en => en.hurt(this, 2));
+         if (nearEnemies.length > 0) {
+           this.spawnParticles(e.x, e.y, 20, STYLE.gold, 6.0);
+         }
+       }
+       
+       // HP pickups removed - HP regen handled by partner system
+ 
+       if (e.type === 'splitter') {
+         for (let i=0;i<2;i++) {
+           const nx = e.x + randInt(-18, 18);
+           const ny = e.y + randInt(-18, 18);
+           const s = new Enemy(nx, ny, this.wave, this.mult, 'runner');
+           s.maxHp = Math.max(1, Math.floor(e.maxHp * 0.35));
+           s.hp = s.maxHp;
+           s.r = 9;
+           this.enemies.push(s);
+         }
+       } else if (e.type === 'splitterPlus') {
+         // Splitter+ splits into varied enemy types
+         const splitTypes = ['runner', 'chaser', 'shooter'];
+         const count = 3;
+         for (let i=0;i<count;i++) {
+           const nx = e.x + randInt(-25, 25);
+           const ny = e.y + randInt(-25, 25);
+           const splitType = splitTypes[randInt(0, splitTypes.length - 1)];
+           const s = new Enemy(nx, ny, this.wave, this.mult, splitType);
+           s.maxHp = Math.max(1, Math.floor(e.maxHp * 0.25));
+           s.hp = s.maxHp;
+           s.r = Math.max(8, Math.floor(s.r * 0.8));
+           this.enemies.push(s);
+         }
+         this.spawnExplosion(e.x, e.y, 1.2);
+       }
+     }
+ 
+-    spawnWaveEnemies() {
+-      const b = this.bounds;
+-      const base = Math.floor(EnemyBasePerWave * (0.85 + this.wave*0.14) * this.mult.enemyCount);
+-      const n = clamp(base, 4, 26);
+-      for (let i=0;i<n;i++) {
+-        const side = randInt(0,3);
+-        let x=b.l+20, y=b.t+20;
+-        if (side===0){ x=b.l+10; y=randInt(b.t+20, b.b-20); }
+-        if (side===1){ x=b.r-10; y=randInt(b.t+20, b.b-20); }
+-        if (side===2){ x=randInt(b.l+20, b.r-20); y=b.t+10; }
+-        if (side===3){ x=randInt(b.l+20, b.r-20); y=b.b-10; }
+-
+-        const roll = rand01();
+-        let type='chaser';
+-        
+-        // Progressive enemy type unlocks
+-        if (this.wave >= 2 && roll < 0.15) type='runner';
+-        if (this.wave >= 3 && roll >= 0.15 && roll < 0.28) type='tank';
+-        if (this.wave >= 3 && roll >= 0.28 && roll < 0.40) type='shooter';
+-        if (this.wave >= 4 && roll >= 0.40 && roll < 0.50) type='splitter';
+-        if (this.wave >= 5 && roll >= 0.50 && roll < 0.58) type='teleporter';
+-        if (this.wave >= 6 && roll >= 0.58 && roll < 0.65) type='sniper';
+-        if (this.wave >= 7 && roll >= 0.65 && roll < 0.72) type='droneSpawner';
+-        if (this.wave >= 8 && roll >= 0.72 && roll < 0.78) type='healer';
+-        if (this.wave >= 11 && roll >= 0.78 && roll < 0.83) type='shieldProjector';
+-        if (this.wave >= 13 && roll >= 0.83 && roll < 0.87) type='railCharger';
+-        if (this.wave >= 15 && roll >= 0.87 && roll < 0.91) type='shieldWall';
+-        if (this.wave >= 17 && roll >= 0.91 && roll < 0.94) type='splitterPlus';
+-        
+-        // Rare mimic spawns (1% chance after wave 12)
+-        if (this.wave >= 12 && roll >= 0.99) type='mimic';
+-        
+-        this.enemies.push(new Enemy(x, y, this.wave, this.mult, type));
+-      }
+-    }
++    spawnWaveEnemies() {
++      const b = this.bounds;
++      const baseBudget = Math.floor(EnemyBasePerWave * (0.95 + this.wave * 0.16) * this.mult.enemyCount);
++      const budget = clamp(baseBudget, 5, 32);
++      const targetCount = clamp(Math.floor(3 + budget * 0.85), 4, 28);
++      let remainingBudget = budget;
++      let spawned = 0;
++
++      const spawnAtEdge = (type) => {
++        const side = randInt(0,3);
++        let x=b.l+20, y=b.t+20;
++        if (side===0){ x=b.l+10; y=randInt(b.t+20, b.b-20); }
++        if (side===1){ x=b.r-10; y=randInt(b.t+20, b.b-20); }
++        if (side===2){ x=randInt(b.l+20, b.r-20); y=b.t+10; }
++        if (side===3){ x=randInt(b.l+20, b.r-20); y=b.b-10; }
++        this.enemies.push(new Enemy(x, y, this.wave, this.mult, type));
++        spawned++;
++      };
++
++      while (remainingBudget > 0 && spawned < targetCount) {
++        const squad = pickSquad(this.wave, remainingBudget);
++        if (!squad) break;
++        remainingBudget -= squad.cost;
++        for (const type of squad.types) {
++          if (spawned >= targetCount) break;
++          spawnAtEdge(type);
++        }
++      }
++
++      while (remainingBudget > 0 && spawned < targetCount) {
++        const type = pickEnemyType(this.wave, remainingBudget);
++        remainingBudget -= (ENEMY_COSTS[type] || 1);
++        spawnAtEdge(type);
++      }
++    }
+ 
+     spawnBoss() {
+       const cx = (this.bounds.l + this.bounds.r)/2;
+       const cy = (this.bounds.t + this.bounds.b)/2 - 40;
+       const bossIndex = Math.floor((this.wave - 1) / 10); // Different boss every 10 waves
+       this.boss = new Boss(cx, cy, this.mult, bossIndex);
+       this.bossDefeated = false;
+       
+       // Announce boss arrival
+       this.systemMessages.push({ text: `${this.boss.bossName} APPEARS!`, life: 3.0, y: 0, color: this.boss.bossColor });
+       this.shake = Math.min(15, this.shake + 10);
+     }
+ 
+     tryLevelUp() {
+       while (this.xp >= this.xpNeed) {
+         this.xp -= this.xpNeed;
+         this.level++;
+         this.xpNeed = Math.floor((8 + this.level*2.2) * this.mult.xpNeed);
+         this.spawnUpgradeDrops();
+         break;
+       }
+     }
+ 
+     spawnUpgradeDrops() {
+       const picks = this.pickUpgrades(4);
+       const b = this.bounds;
+       const d = 68;
+       const margin = d + 24;
+       const cx = clamp(this.player.x, b.l + margin, b.r - margin);
+       const cy = clamp(this.player.y, b.t + margin, b.b - margin);
+       const pts = [ {x: cx - d, y: cy - d}, {x: cx + d, y: cy - d}, {x: cx - d, y: cy + d}, {x: cx + d, y: cy + d} ];
+       for (let i=0;i<picks.length;i++) {
+         const p = pts[i];
+         this.pickups.push(new Pickup(clamp(p.x, b.l+22, b.r-22), clamp(p.y, b.t+22, b.b-22), 'upgrade', picks[i]));
+       }
+     }
+ 
+-    pickUpgrades(n) {
+-      const pool = UPGRADE_POOL.slice();
+-      const out=[];
+-      while (out.length<n && pool.length>0) {
+-        const idx = randInt(0, pool.length-1);
+-        out.push(pool.splice(idx,1)[0]);
+-      }
+-      return out;
+-    }
+-
+-    applyUpgrade(u) {
+-      if (!u) return;
+-      u.apply({ build: this.build, wpn: this.wpn });
+-      this.score += 2;
+-      this.shake = Math.min(10, this.shake + 3);
+-    }
++    pickUpgrades(n) {
++      const recentKeys = new Set(this.upgradeHistory.slice(-8));
++      const pool = UPGRADE_POOL.filter(u => !recentKeys.has(u.key));
++      const out=[];
++      const removeFromPool = (pick) => {
++        const idx = pool.indexOf(pick);
++        if (idx >= 0) pool.splice(idx, 1);
++      };
++      const weaponPool = pool.filter(u => u.tags && u.tags.includes('weapon'));
++      if (!this.build.hasWeaponUpgrade && weaponPool.length > 0) {
++        const weaponPick = weightedPick(weaponPool, item => RARITY_WEIGHTS[item.rarity] || 1);
++        if (weaponPick) {
++          out.push(weaponPick);
++          removeFromPool(weaponPick);
++        }
++      }
++      const pityBonus = clamp(this.upgradePity / 6, 0, 1);
++      while (out.length < n && pool.length > 0) {
++        const pick = weightedPick(pool, item => {
++          const baseWeight = RARITY_WEIGHTS[item.rarity] || 1;
++          const rarityBoost = item.rarity === 'epic' ? (1 + pityBonus * 0.6)
++            : item.rarity === 'legendary' ? (1 + pityBonus * 1.1)
++            : item.rarity === 'rare' ? (1 + pityBonus * 0.35)
++            : 1;
++          const weaponPenalty = (item.tags && item.tags.includes('weapon') && this.build.hasWeaponUpgrade) ? 0.45 : 1;
++          return baseWeight * rarityBoost * weaponPenalty;
++        });
++        if (!pick) break;
++        out.push(pick);
++        removeFromPool(pick);
++      }
++      this.upgradeHistory.push(...out.map(u => u.key));
++      if (this.upgradeHistory.length > 40) this.upgradeHistory.splice(0, this.upgradeHistory.length - 40);
++      return out;
++    }
++
++    applyUpgrade(u) {
++      if (!u) return;
++      u.apply({ build: this.build, wpn: this.wpn });
++      if (u.tags && u.tags.includes('weapon')) this.build.hasWeaponUpgrade = true;
++      this.stats.upgradesCollected[u.key] = (this.stats.upgradesCollected[u.key] || 0) + 1;
++      if (u.rarity === 'epic' || u.rarity === 'legendary') this.upgradePity = 0;
++      else this.upgradePity = Math.min(20, this.upgradePity + 1);
++      this.score += 2;
++      this.shake = Math.min(10, this.shake + 3);
++    }
+ 
+     update() {
+       if (this.paused) return; // Paused logic handled in Scene
+ 
+       if (this.state !== 'play') {
+         this.stateTimer--;
+         return;
+       }
+ 
+       // Boss every 10 waves in endless mode
+       const isBossWave = (this.wave % 10 === 0);
+       if (isBossWave) {
+         if (!this.boss) {
+           this.enemies.length = 0;
+           this.spawnBoss();
+         }
+       } else {
+         if (this.enemies.length === 0 && this.waveTimer > 0 && !this.boss) {
+           this.spawnWaveEnemies();
+           this.waveTimer = 999999;
+         }
+       }
+ 
+       for (const hz of this.hazards) hz.t += dt();
+       for (const hz of this.hazards) {
+@@ -2350,65 +2500,67 @@
+         if (hz.kind==='laser') return hz.t < hz.tele + hz.live;
+         return hz.t < 2.0;
+       });
+ 
+       this.player.update(this);
+       this.partner.update(this);
+       for (const e of this.enemies) e.update(this);
+       if (this.boss && !this.boss.dead) this.boss.update(this);
+ 
+       for (const b of this.bullets) b.update(this);
+       for (const b of this.enemyBullets) b.update(this);
+       for (const p of this.pickups) p.update(this);
+       for (const pt of this.particles) pt.update();
+       for (const f of this.floaters) f.update();
+ 
+       this.handleCollisions();
+ 
+       this.enemies = this.enemies.filter(e => !e.dead);
+       this.bullets = this.bullets.filter(b => !b.dead);
+       this.enemyBullets = this.enemyBullets.filter(b => !b.dead);
+       this.pickups = this.pickups.filter(p => !p.dead);
+       this.particles = this.particles.filter(p => p.life > 0);
+       this.floaters = this.floaters.filter(f => f.life > 0);
+ 
+       const isBossWave2 = (this.wave % 10 === 0);
+-      if (isBossWave2) {
+-        if (this.boss && this.boss.dead) {
+-          // Boss defeated - advance to next wave
+-          this.boss = null;
+-          this.waveTimer = 0;
+-          this.wave++;
+-        }
+-      } else {
+-        if (this.enemies.length === 0 && this.waveTimer > 0) {
+-          this.waveTimer = 0;
+-          // ENDLESS MODE - no win condition, just keep going!
+-          this.wave++;
+-          this.waveTimer = 0;
+-        }
+-      }
++      if (isBossWave2) {
++        if (this.boss && this.boss.dead) {
++          // Boss defeated - advance to next wave
++          this.boss = null;
++          this.waveTimer = 0;
++          this.wave++;
++          this.stats.maxWaveReached = Math.max(this.stats.maxWaveReached, this.wave);
++        }
++      } else {
++        if (this.enemies.length === 0 && this.waveTimer > 0) {
++          this.waveTimer = 0;
++          // ENDLESS MODE - no win condition, just keep going!
++          this.wave++;
++          this.stats.maxWaveReached = Math.max(this.stats.maxWaveReached, this.wave);
++          this.waveTimer = 0;
++        }
++      }
+ 
+       // HP regeneration when partner is alive
+       if (this.partner.enabled && !this.partner.dead && this.player.hp < this.player.maxHp) {
+         this.hpRegenTimer++;
+         if (this.hpRegenTimer >= this.hpRegenInterval) {
+           this.hpRegenTimer = 0;
+           this.player.hp = Math.min(this.player.maxHp, this.player.hp + 1);
+           this.spawnFloater(this.player.x, this.player.y - 15, '+1 HP', STYLE.neon);
+           this.spawnParticles(this.player.x, this.player.y, 8, STYLE.neon, 2.0, 'glow');
+         }
+       } else {
+         this.hpRegenTimer = 0;
+       }
+ 
+       this.tryLevelUp();
+       this.updateArenaEffects();
+       this.shake = Math.max(0, this.shake - 0.7);
+     }
+ 
+     updateArenaEffects() {
+       this.arenaGlitchLevel = Math.min(0.5, this.wave * 0.02);
+       this.parallaxOffset += dt() * 0.5;
+ 
+       for (const m of this.systemMessages) m.life -= dt();
+       this.systemMessages = this.systemMessages.filter(m => m.life > 0);
+@@ -3712,26 +3864,26 @@
+           // Description
+           bmp.fontSize = 11;
+           bmp.textColor = STYLE.textDim;
+           bmp.drawText(u.desc, x + 5, y0 + 28, cardW - 15, 40, 'left');
+           
+           // Hotkey
+           bmp.fontSize = 10;
+           bmp.textColor = STYLE.gold;
+           bmp.drawText(`[${i + 1}]`, x + 5, y0 + boxH - 20, 30, 14, 'left');
+         }
+       }
+ 
+       // === WIN/LOSE STATES ===
+       if (g.state === 'win') {
+         bmp.fontSize = 48;
+         bmp.textColor = STYLE.neon;
+         bmp.drawText('⚡ HACK COMPLETE! ⚡', 0, b.t + 120, Graphics.width, 52, 'center');
+       }
+       if (g.state === 'lose') {
+         bmp.fontSize = 48;
+         bmp.textColor = STYLE.danger;
+         bmp.drawText('☠ SYSTEM FAILURE ☠', 0, b.t + 120, Graphics.width, 52, 'center');
+       }
+     }
+   }
+-})();
+\ No newline at end of file
++})();

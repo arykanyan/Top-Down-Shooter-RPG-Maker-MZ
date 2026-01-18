@@ -371,6 +371,16 @@
     const dx = x2 - x1, dy = y2 - y1;
     return dx*dx + dy*dy;
   };
+  const weightedPick = (items, weightFn) => {
+    const total = items.reduce((sum, item) => sum + Math.max(0, weightFn(item)), 0);
+    if (total <= 0) return null;
+    let roll = Math.random() * total;
+    for (const item of items) {
+      roll -= Math.max(0, weightFn(item));
+      if (roll <= 0) return item;
+    }
+    return items[items.length - 1] || null;
+  };
 
   function dt() {
     const d = Number(Graphics.deltaTime);
@@ -772,6 +782,107 @@
     }
   }
 
+  const RARITY_WEIGHTS = {
+    common: 6,
+    rare: 3.2,
+    epic: 1.6,
+    legendary: 0.7,
+  };
+
+  const ENEMY_SCORE = {
+    chaser: 1,
+    runner: 1,
+    tank: 2,
+    shooter: 2,
+    splitter: 2,
+    teleporter: 2,
+    anchor: 2,
+    sniper: 3,
+    droneSpawner: 3,
+    healer: 3,
+    mimic: 2,
+    shieldProjector: 3,
+    shieldWall: 4,
+    railCharger: 3,
+    splitterPlus: 4,
+  };
+
+  const ENEMY_COSTS = {
+    chaser: 1,
+    runner: 1,
+    tank: 2,
+    shooter: 2,
+    splitter: 2,
+    teleporter: 2,
+    anchor: 2,
+    sniper: 3,
+    droneSpawner: 3,
+    healer: 3,
+    mimic: 2,
+    shieldProjector: 3,
+    shieldWall: 4,
+    railCharger: 3,
+    splitterPlus: 4,
+  };
+
+  const ENEMY_TIER_TABLE = [
+    { minWave: 1, weights: { chaser: 8, runner: 1 } },
+    { minWave: 2, weights: { chaser: 6, runner: 2, shooter: 1 } },
+    { minWave: 3, weights: { chaser: 5, runner: 2, shooter: 2, tank: 1 } },
+    { minWave: 4, weights: { chaser: 4, runner: 2, shooter: 2, tank: 1, splitter: 1 } },
+    { minWave: 5, weights: { chaser: 3, runner: 2, shooter: 2, tank: 1, splitter: 1, teleporter: 1 } },
+    { minWave: 6, weights: { chaser: 3, runner: 2, shooter: 2, tank: 1, splitter: 1, teleporter: 1, sniper: 1 } },
+    { minWave: 7, weights: { chaser: 3, runner: 2, shooter: 2, tank: 1, splitter: 1, teleporter: 1, sniper: 1, droneSpawner: 1 } },
+    { minWave: 8, weights: { chaser: 2, runner: 2, shooter: 2, tank: 1, splitter: 1, teleporter: 1, sniper: 1, droneSpawner: 1, healer: 1 } },
+    { minWave: 11, weights: { chaser: 2, runner: 2, shooter: 2, tank: 1, splitter: 1, teleporter: 1, sniper: 1, droneSpawner: 1, healer: 1, shieldProjector: 1 } },
+    { minWave: 13, weights: { chaser: 2, runner: 2, shooter: 2, tank: 1, splitter: 1, teleporter: 1, sniper: 1, droneSpawner: 1, healer: 1, shieldProjector: 1, railCharger: 1 } },
+    { minWave: 15, weights: { chaser: 2, runner: 2, shooter: 2, tank: 1, splitter: 1, teleporter: 1, sniper: 1, droneSpawner: 1, healer: 1, shieldProjector: 1, railCharger: 1, shieldWall: 1 } },
+    { minWave: 17, weights: { chaser: 2, runner: 2, shooter: 2, tank: 1, splitter: 1, teleporter: 1, sniper: 1, droneSpawner: 1, healer: 1, shieldProjector: 1, railCharger: 1, shieldWall: 1, splitterPlus: 1 } },
+    { minWave: 20, weights: { chaser: 2, runner: 2, shooter: 2, tank: 1, splitter: 1, teleporter: 1, sniper: 1, droneSpawner: 1, healer: 1, shieldProjector: 1, railCharger: 1, shieldWall: 1, splitterPlus: 1, anchor: 1 } },
+  ];
+
+  const WAVE_SQUADS = [
+    { minWave: 1, weight: 4, cost: 3, types: ['chaser', 'chaser', 'runner'] },
+    { minWave: 2, weight: 3, cost: 4, types: ['runner', 'runner', 'chaser', 'shooter'] },
+    { minWave: 3, weight: 3, cost: 5, types: ['chaser', 'shooter', 'tank'] },
+    { minWave: 4, weight: 3, cost: 5, types: ['runner', 'splitter', 'chaser', 'chaser'] },
+    { minWave: 5, weight: 2, cost: 6, types: ['teleporter', 'runner', 'chaser', 'shooter'] },
+    { minWave: 6, weight: 2, cost: 6, types: ['sniper', 'runner', 'chaser', 'chaser'] },
+    { minWave: 7, weight: 2, cost: 7, types: ['droneSpawner', 'runner', 'chaser'] },
+    { minWave: 8, weight: 2, cost: 7, types: ['healer', 'tank', 'chaser', 'runner'] },
+    { minWave: 11, weight: 2, cost: 8, types: ['shieldProjector', 'shooter', 'chaser', 'runner'] },
+    { minWave: 13, weight: 2, cost: 8, types: ['railCharger', 'runner', 'shooter', 'chaser'] },
+    { minWave: 15, weight: 1, cost: 9, types: ['shieldWall', 'tank', 'runner'] },
+    { minWave: 17, weight: 1, cost: 9, types: ['splitterPlus', 'shooter', 'chaser'] },
+    { minWave: 20, weight: 1, cost: 9, types: ['anchor', 'shooter', 'runner', 'chaser'] },
+  ];
+
+  function getEnemyWeights(wave) {
+    let active = ENEMY_TIER_TABLE[0].weights;
+    for (const tier of ENEMY_TIER_TABLE) {
+      if (wave >= tier.minWave) active = tier.weights;
+    }
+    return active;
+  }
+
+  function pickEnemyType(wave, remainingBudget) {
+    const weights = getEnemyWeights(wave);
+    const entries = Object.keys(weights)
+      .filter(type => (ENEMY_COSTS[type] || 1) <= remainingBudget)
+      .map(type => ({ type, weight: weights[type] }));
+    if (wave >= 12 && remainingBudget >= ENEMY_COSTS.mimic && rand01() < 0.06) {
+      return 'mimic';
+    }
+    const picked = weightedPick(entries, item => item.weight);
+    return picked ? picked.type : 'chaser';
+  }
+
+  function pickSquad(wave, remainingBudget) {
+    const options = WAVE_SQUADS.filter(squad => squad.minWave <= wave && squad.cost <= remainingBudget);
+    if (options.length === 0) return null;
+    return weightedPick(options, squad => squad.weight);
+  }
+
   // ---------------------------------------------------------------------------
   // Style
   // ---------------------------------------------------------------------------
@@ -1166,7 +1277,9 @@
     }
 
     hurt(g, dmg) {
+      const dealt = Math.min(dmg, this.hp);
       this.hp -= dmg;
+      g.stats.damageDealt += dealt;
       this.hitFlash = 0.22;
       g.spawnImpactSparks(this.x, this.y, this.vx, this.vy);
       g.spawnFloater(this.x, this.y - 12, String(dmg), (dmg > 2 ? STYLE.gold : STYLE.white));
@@ -1721,7 +1834,9 @@
         }
       }
       
+      const dealt = Math.min(dmg, this.hp);
       this.hp -= dmg;
+      g.stats.damageDealt += dealt;
       this.hitFlash = 0.25;
       this.invuln = 0.05;
       g.spawnFloater(this.x, this.y - 30, String(dmg), STYLE.pink);
@@ -2016,6 +2131,7 @@
         xpMul: 1.0,
         explosive: false,
         homing: false,
+        hasWeaponUpgrade: false,
         player: this.player,
       };
 
@@ -2041,6 +2157,8 @@
       this.upgradeHoverIndex = -1;
       this.upgradeKeyboardIndex = 0;
       this.pauseOnUpgrade = true;
+      this.upgradeHistory = [];
+      this.upgradePity = 0;
       
       // Run statistics for summary
       this.stats = {
@@ -2171,7 +2289,9 @@
     }
 
     onEnemyKilled(e) {
-      this.score += 1;
+      const scoreGain = ENEMY_SCORE[e.type] || 1;
+      this.score += scoreGain;
+      this.stats.killsByType[e.type] = (this.stats.killsByType[e.type] || 0) + 1;
       const xpGain = Math.floor((1 + (this.wave * 0.05)) * (this.build.xpMul || 1.0));
       this.xp += xpGain;
       this.spawnFloater(e.x, e.y, `+${xpGain} XP`, STYLE.cyan);
@@ -2224,37 +2344,37 @@
 
     spawnWaveEnemies() {
       const b = this.bounds;
-      const base = Math.floor(EnemyBasePerWave * (0.85 + this.wave*0.14) * this.mult.enemyCount);
-      const n = clamp(base, 4, 26);
-      for (let i=0;i<n;i++) {
+      const baseBudget = Math.floor(EnemyBasePerWave * (0.95 + this.wave * 0.16) * this.mult.enemyCount);
+      const budget = clamp(baseBudget, 5, 32);
+      const targetCount = clamp(Math.floor(3 + budget * 0.85), 4, 28);
+      let remainingBudget = budget;
+      let spawned = 0;
+
+      const spawnAtEdge = (type) => {
         const side = randInt(0,3);
         let x=b.l+20, y=b.t+20;
         if (side===0){ x=b.l+10; y=randInt(b.t+20, b.b-20); }
         if (side===1){ x=b.r-10; y=randInt(b.t+20, b.b-20); }
         if (side===2){ x=randInt(b.l+20, b.r-20); y=b.t+10; }
         if (side===3){ x=randInt(b.l+20, b.r-20); y=b.b-10; }
-
-        const roll = rand01();
-        let type='chaser';
-        
-        // Progressive enemy type unlocks
-        if (this.wave >= 2 && roll < 0.15) type='runner';
-        if (this.wave >= 3 && roll >= 0.15 && roll < 0.28) type='tank';
-        if (this.wave >= 3 && roll >= 0.28 && roll < 0.40) type='shooter';
-        if (this.wave >= 4 && roll >= 0.40 && roll < 0.50) type='splitter';
-        if (this.wave >= 5 && roll >= 0.50 && roll < 0.58) type='teleporter';
-        if (this.wave >= 6 && roll >= 0.58 && roll < 0.65) type='sniper';
-        if (this.wave >= 7 && roll >= 0.65 && roll < 0.72) type='droneSpawner';
-        if (this.wave >= 8 && roll >= 0.72 && roll < 0.78) type='healer';
-        if (this.wave >= 11 && roll >= 0.78 && roll < 0.83) type='shieldProjector';
-        if (this.wave >= 13 && roll >= 0.83 && roll < 0.87) type='railCharger';
-        if (this.wave >= 15 && roll >= 0.87 && roll < 0.91) type='shieldWall';
-        if (this.wave >= 17 && roll >= 0.91 && roll < 0.94) type='splitterPlus';
-        
-        // Rare mimic spawns (1% chance after wave 12)
-        if (this.wave >= 12 && roll >= 0.99) type='mimic';
-        
         this.enemies.push(new Enemy(x, y, this.wave, this.mult, type));
+        spawned++;
+      };
+
+      while (remainingBudget > 0 && spawned < targetCount) {
+        const squad = pickSquad(this.wave, remainingBudget);
+        if (!squad) break;
+        remainingBudget -= squad.cost;
+        for (const type of squad.types) {
+          if (spawned >= targetCount) break;
+          spawnAtEdge(type);
+        }
+      }
+
+      while (remainingBudget > 0 && spawned < targetCount) {
+        const type = pickEnemyType(this.wave, remainingBudget);
+        remainingBudget -= (ENEMY_COSTS[type] || 1);
+        spawnAtEdge(type);
       }
     }
 
@@ -2295,18 +2415,48 @@
     }
 
     pickUpgrades(n) {
-      const pool = UPGRADE_POOL.slice();
+      const recentKeys = new Set(this.upgradeHistory.slice(-8));
+      const pool = UPGRADE_POOL.filter(u => !recentKeys.has(u.key));
       const out=[];
-      while (out.length<n && pool.length>0) {
-        const idx = randInt(0, pool.length-1);
-        out.push(pool.splice(idx,1)[0]);
+      const removeFromPool = (pick) => {
+        const idx = pool.indexOf(pick);
+        if (idx >= 0) pool.splice(idx, 1);
+      };
+      const weaponPool = pool.filter(u => u.tags && u.tags.includes('weapon'));
+      if (!this.build.hasWeaponUpgrade && weaponPool.length > 0) {
+        const weaponPick = weightedPick(weaponPool, item => RARITY_WEIGHTS[item.rarity] || 1);
+        if (weaponPick) {
+          out.push(weaponPick);
+          removeFromPool(weaponPick);
+        }
       }
+      const pityBonus = clamp(this.upgradePity / 6, 0, 1);
+      while (out.length < n && pool.length > 0) {
+        const pick = weightedPick(pool, item => {
+          const baseWeight = RARITY_WEIGHTS[item.rarity] || 1;
+          const rarityBoost = item.rarity === 'epic' ? (1 + pityBonus * 0.6)
+            : item.rarity === 'legendary' ? (1 + pityBonus * 1.1)
+            : item.rarity === 'rare' ? (1 + pityBonus * 0.35)
+            : 1;
+          const weaponPenalty = (item.tags && item.tags.includes('weapon') && this.build.hasWeaponUpgrade) ? 0.45 : 1;
+          return baseWeight * rarityBoost * weaponPenalty;
+        });
+        if (!pick) break;
+        out.push(pick);
+        removeFromPool(pick);
+      }
+      this.upgradeHistory.push(...out.map(u => u.key));
+      if (this.upgradeHistory.length > 40) this.upgradeHistory.splice(0, this.upgradeHistory.length - 40);
       return out;
     }
 
     applyUpgrade(u) {
       if (!u) return;
       u.apply({ build: this.build, wpn: this.wpn });
+      if (u.tags && u.tags.includes('weapon')) this.build.hasWeaponUpgrade = true;
+      this.stats.upgradesCollected[u.key] = (this.stats.upgradesCollected[u.key] || 0) + 1;
+      if (u.rarity === 'epic' || u.rarity === 'legendary') this.upgradePity = 0;
+      else this.upgradePity = Math.min(20, this.upgradePity + 1);
       this.score += 2;
       this.shake = Math.min(10, this.shake + 3);
     }
@@ -2378,12 +2528,14 @@
           this.boss = null;
           this.waveTimer = 0;
           this.wave++;
+          this.stats.maxWaveReached = Math.max(this.stats.maxWaveReached, this.wave);
         }
       } else {
         if (this.enemies.length === 0 && this.waveTimer > 0) {
           this.waveTimer = 0;
           // ENDLESS MODE - no win condition, just keep going!
           this.wave++;
+          this.stats.maxWaveReached = Math.max(this.stats.maxWaveReached, this.wave);
           this.waveTimer = 0;
         }
       }
@@ -3713,7 +3865,7 @@
           bmp.fontSize = 11;
           bmp.textColor = STYLE.textDim;
           bmp.drawText(u.desc, x + 5, y0 + 28, cardW - 15, 40, 'left');
-          
+
           // Hotkey
           bmp.fontSize = 10;
           bmp.textColor = STYLE.gold;
